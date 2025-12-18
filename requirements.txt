@@ -1,0 +1,4 @@
+flask
+pure-python-adb
+pandas
+openpyxl
