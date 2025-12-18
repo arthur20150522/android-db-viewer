@@ -203,7 +203,7 @@ document.addEventListener('DOMContentLoaded', function() {
             // Problem: We don't have dbName easily mapped from tableName or token.
             // Solution: We need to store currentDbName in state when we open a DB.
             if (state.currentDbName) {
-                await fetch('/api/pull', {
+                const res = await fetch('/api/pull', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
@@ -212,11 +212,55 @@ document.addEventListener('DOMContentLoaded', function() {
                         db_name: state.currentDbName
                     })
                 });
+
+                // Error handling for Auto-Monitor
+                if (!res.ok) {
+                    // If device not found or other critical error, stop monitor
+                    const data = await res.json();
+                    console.error("Auto-refresh pull failed:", data.error);
+                    
+                    // Check for specific errors to stop monitor
+                    // Usually 500 means device issues or permissions
+                    if (res.status === 500 || res.status === 404) {
+                        const tabState = state.openTabs[tableName];
+                        if (tabState && tabState.monitor) {
+                            // Stop monitoring
+                            toggleMonitor(tableName, false);
+                            // Uncheck the UI box
+                            const monitorCheck = document.getElementById(`monitor-${tableName}`);
+                            if (monitorCheck) monitorCheck.checked = false;
+                            
+                            // Show toast or alert? Maybe just a console log or small UI indication.
+                            // Let's replace the table content with error
+                            const container = document.getElementById(`data-${tableName}`);
+                            if (container) {
+                                container.innerHTML = `<div class="alert alert-warning">
+                                    <strong>Monitor Stopped:</strong> Failed to pull database (Device disconnected?). 
+                                    <br><small>${data.error || 'Unknown error'}</small>
+                                </div>`;
+                            }
+                        }
+                    }
+                    return; // Don't fetch data if pull failed
+                }
+                
+                // Update token with the new one (timestamped)
+                const data = await res.json();
+                if (data.success && data.token) {
+                    state.dbToken = data.token;
+                }
             }
             // After pull (or fail), fetch data
             fetchTableData(tableName);
         } catch (e) {
             console.error("Auto-refresh pull failed", e);
+            // Network error, also stop monitor
+            const tabState = state.openTabs[tableName];
+            if (tabState && tabState.monitor) {
+                toggleMonitor(tableName, false);
+                const monitorCheck = document.getElementById(`monitor-${tableName}`);
+                if (monitorCheck) monitorCheck.checked = false;
+            }
         }
     }
 

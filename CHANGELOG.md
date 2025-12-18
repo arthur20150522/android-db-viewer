@@ -1,5 +1,13 @@
 # Changelog
 
+## [v1.2.3] - 2025-12-18
+
+### 🐛 Bug Fixes
+- **Data Consistency**: Fixed a critical issue where "Monitor" and "Refresh" would show stale data on Windows due to file locking preventing database overwrites.
+- **Snapshot Management**: Implemented unique timestamped filenames for every pull to ensure fresh data access.
+- **Auto-Cleanup**: Added automatic cleanup of old temporary database files to prevent disk clutter.
+- **Monitor Sync**: Fixed synchronization between the backend pull process and frontend data fetching.
+
 ## [v1.2.0] - 2025-12-18
 
 ### 🚀 New Features

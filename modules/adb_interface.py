@@ -16,13 +16,45 @@ class ADBInterface:
                 shell=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
-                encoding='utf-8' # Force UTF-8
+                # text=True,  <-- REMOVED: We need binary output for base64
+                # encoding='utf-8' <-- REMOVED
             )
             if result.returncode != 0:
-                print(f"Error running command '{full_command}': {result.stderr}")
+                # Need to decode stderr for logging
+                try:
+                    err = result.stderr.decode('utf-8', errors='ignore')
+                except:
+                    err = str(result.stderr)
+                print(f"Error running command '{full_command}': {err}")
                 return None
-            return result.stdout.strip()
+            
+            # For list_packages and others that expect string, we try to decode.
+            # For base64 output, we need to handle it carefully in caller, 
+            # BUT here we are a generic runner.
+            # To avoid breaking existing code, we try to decode as utf-8 by default.
+            # If it fails (binary garbage?), we return bytes?
+            # Or better: We change _run_command to ALWAYS return bytes, and let callers decode?
+            # That's a big refactor.
+            # 
+            # Alternative: Add a 'binary' flag to this method.
+            # But we can't easily change signature everywhere.
+            
+            # Let's try to decode. Base64 IS valid utf-8 text (it's ASCII).
+            # The problem with 'text=True' in subprocess on Windows is \r\n translation.
+            # By reading bytes and decoding manually, we avoid automatic newline translation?
+            # Python's decode() usually handles newlines fine, but subprocess text mode does more.
+            
+            try:
+                return result.stdout.decode('utf-8').strip()
+            except UnicodeDecodeError:
+                # If it's not text, return raw bytes? 
+                # Existing code expects string (e.g. split('\n')).
+                # If we return bytes, code like "if 'Permission' in output" will fail.
+                # Base64 output IS text. So decode() should work.
+                # The fix is that we REMOVED text=True, so we get raw bytes from pipe, 
+                # avoiding Windows CRLF mangling of the stream BEFORE we get it.
+                return result.stdout.decode('utf-8', errors='ignore').strip()
+                
         except Exception as e:
             print(f"Exception running command '{full_command}': {e}")
             return None
@@ -141,54 +173,101 @@ class ADBInterface:
         return databases
 
     def pull_database(self, device_id, package_name, db_name, local_path):
-        """Pull a database file from the device to local path."""
-        # Method 1: Try Root (su)
-        # 1. Copy to /sdcard/ (readable)
-        temp_remote_path = f"/sdcard/{db_name}"
-        cp_cmd = f"cp /data/data/{package_name}/databases/{db_name} {temp_remote_path}"
-        # Make sure it's readable
-        chmod_cmd = f"chmod 644 {temp_remote_path}"
+        """Pull a database file and its auxiliary files (WAL/SHM) from the device."""
         
-        full_shell_cmd = f"{cp_cmd} && {chmod_cmd}"
+        # Helper to pull a single file
+        def pull_file(filename, target_path):
+            # Method 1: Try Root (su)
+            temp_remote_path = f"/sdcard/{filename}"
+            cp_cmd = f"cp /data/data/{package_name}/databases/{filename} {temp_remote_path}"
+            chmod_cmd = f"chmod 644 {temp_remote_path}"
+            full_shell_cmd = f"{cp_cmd} && {chmod_cmd}"
+            
+            command_su = f"-s {device_id} shell \"su -c '{full_shell_cmd}'\""
+            self._run_command(command_su)
+            
+            pull_cmd = f"-s {device_id} pull {temp_remote_path} \"{target_path}\""
+            self._run_command(pull_cmd)
+            
+            rm_cmd = f"-s {device_id} shell rm {temp_remote_path}"
+            self._run_command(rm_cmd)
+            
+            if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
+                return True
+                
+            # Method 2: Try run-as (Debuggable) using Base64 Streaming
+            print(f"Root pull failed/not available, trying run-as for {filename}...")
+            
+            # Use 'cp' to cache to avoid file locking issues with 'cat' on live WAL files
+            # 1. Copy to cache/temp_<filename>
+            # 2. Cat from cache
+            # 3. Remove from cache
+            temp_cache_file = f"cache/temp_{filename}_{int(time.time())}"
+            
+            # Step 1: Copy (cp preserves content better than cat for locked files)
+            cp_cmd = f"-s {device_id} shell \"run-as {package_name} cp databases/{filename} {temp_cache_file}\""
+            self._run_command(cp_cmd)
+            
+            # Step 2: Cat | base64
+            stream_cmd = f"-s {device_id} shell \"run-as {package_name} cat {temp_cache_file} | base64\""
+            b64_output = self._run_command(stream_cmd)
+            
+            # Step 3: Cleanup (always try)
+            rm_cmd = f"-s {device_id} shell \"run-as {package_name} rm {temp_cache_file}\""
+            self._run_command(rm_cmd)
+            
+            if b64_output and "package not debuggable" not in b64_output and "No such file" not in b64_output:
+                try:
+                    # Clean up output (remove newlines etc)
+                    b64_data = b64_output.replace('\n', '').replace('\r', '')
+                    
+                    # Debug log
+                    print(f"Run-as pull {filename}: {len(b64_data)} bytes base64")
+
+                    # If empty
+                    if not b64_data:
+                        print(f"File {filename} is empty or not found via run-as.")
+                        if filename == db_name:
+                             return False
+                        return False 
+
+                    file_data = base64.b64decode(b64_data)
+                    with open(target_path, 'wb') as f:
+                        f.write(file_data)
+                    return True
+                except Exception as e:
+                    print(f"Failed to decode base64 stream for {filename}: {e}")
+                    return False
+            else:
+                print(f"Run-as failed for {filename}. Output: {b64_output[:100] if b64_output else 'None'}")
+            return False
+
+        # 1. First, try to pull WAL and SHM files (The "Incrementals")
+        # We pull them BEFORE the main DB.
+        # Rationale: If checkpoint happens during pull:
+        #   Case A: Pull WAL (has data) -> Checkpoint -> Pull DB (has data). Result: WAL+DB both have data. SQLite handles this.
+        #   Case B: Pull DB (old) -> Checkpoint -> Pull WAL (empty). Result: Old DB + Empty WAL. DATA LOST!
+        # So, pulling WAL first is safer.
         
-        command_su = f"-s {device_id} shell \"su -c '{full_shell_cmd}'\""
-        self._run_command(command_su)
+        wal_file = f"{db_name}-wal"
+        shm_file = f"{db_name}-shm"
         
-        # 2. Pull from /sdcard/
-        pull_cmd = f"-s {device_id} pull {temp_remote_path} \"{local_path}\""
-        self._run_command(pull_cmd)
+        # Important: The local filename must match the tokenized DB name + suffix
+        local_wal = f"{local_path}-wal"
+        local_shm = f"{local_path}-shm"
         
-        # 3. Clean up remote temp file
-        rm_cmd = f"-s {device_id} shell rm {temp_remote_path}"
-        self._run_command(rm_cmd)
+        # Remove old aux files if they exist locally to avoid staleness
+        if os.path.exists(local_wal): os.remove(local_wal)
+        if os.path.exists(local_shm): os.remove(local_shm)
         
-        if os.path.exists(local_path) and os.path.getsize(local_path) > 0:
+        # Best effort pull for aux files
+        pull_file(wal_file, local_wal)
+        pull_file(shm_file, local_shm)
+
+        # 2. Pull the main DB file (The "Base")
+        main_success = pull_file(db_name, local_path)
+        
+        if main_success:
             return True
             
-        # Method 2: Try run-as (Debuggable) using Base64 Streaming
-        print(f"Root pull failed, trying run-as for {package_name}...")
-        
-        # Command: run-as <pkg> cat databases/<db> | base64
-        # We wrap in another shell to ensure pipe works
-        stream_cmd = f"-s {device_id} shell \"run-as {package_name} cat databases/{db_name} | base64\""
-        
-        # We need to capture the output carefully (it might be large)
-        # Note: self._run_command captures stdout. 
-        # Large DBs might be an issue for memory, but for typical mobile DBs it's okay.
-        b64_output = self._run_command(stream_cmd)
-        
-        if b64_output and "package not debuggable" not in b64_output and "No such file" not in b64_output:
-            try:
-                # Clean up output (remove newlines etc)
-                b64_data = b64_output.replace('\n', '').replace('\r', '')
-                file_data = base64.b64decode(b64_data)
-                
-                with open(local_path, 'wb') as f:
-                    f.write(file_data)
-                
-                return os.path.exists(local_path) and os.path.getsize(local_path) > 0
-            except Exception as e:
-                print(f"Failed to decode base64 stream: {e}")
-                return False
-                
         return False

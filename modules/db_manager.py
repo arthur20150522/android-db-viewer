@@ -10,6 +10,19 @@ class DBManager:
         try:
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
+            
+            # Force WAL Checkpoint to ensure we see the latest data from the pulled WAL file
+            # This is crucial because we just pulled raw files and SQLite might not auto-checkpoint immediately
+            # or correctly in this read-only-like scenario.
+            try:
+                # PASSIVE: Checkpoint as much as possible without blocking
+                # FULL: Checkpoint everything (might block if locks exist, but here we are single user)
+                conn.execute("PRAGMA wal_checkpoint(FULL);")
+            except Exception as e:
+                # It might fail if database is locked or not in WAL mode, which is fine
+                # print(f"Checkpoint warning: {e}")
+                pass
+                
             return conn
         except sqlite3.Error as e:
             print(f"Error connecting to database: {e}")

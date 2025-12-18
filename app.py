@@ -2,6 +2,7 @@ from flask import Flask, render_template, jsonify, request, send_file
 import os
 import json
 import uuid
+import time
 from config import Config
 from modules.adb_interface import ADBInterface
 from modules.db_manager import DBManager
@@ -67,10 +68,27 @@ def pull_database():
     if not all([device_id, package_name, db_name]):
         return jsonify({'error': 'Missing parameters'}), 400
         
-    # Generate a unique filename to avoid collisions
-    # Format: device_package_dbname.sqlite (sanitized)
+    # Generate a unique filename to avoid collisions and file locking issues on Windows
+    # Format: device_package_dbname_timestamp.sqlite
     safe_pkg = package_name.replace('.', '_')
-    token = f"{device_id}_{safe_pkg}_{db_name}"
+    base_token = f"{device_id}_{safe_pkg}_{db_name}"
+    timestamp = int(time.time() * 1000)
+    token = f"{base_token}_{timestamp}"
+    
+    # Cleanup old files for this specific database to prevent disk filling
+    try:
+        temp_dir = app.config['TEMP_DIR']
+        for filename in os.listdir(temp_dir):
+            if filename.startswith(base_token):
+                file_path = os.path.join(temp_dir, filename)
+                try:
+                    # Try to remove. If locked (very unlikely now), ignore.
+                    os.remove(file_path)
+                except Exception as e:
+                    print(f"Cleanup warning for {filename}: {e}")
+    except Exception as e:
+        print(f"Directory cleanup warning: {e}")
+
     local_path = get_db_path(token)
     
     success = adb.pull_database(device_id, package_name, db_name, local_path)
