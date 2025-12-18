@@ -6,7 +6,18 @@ from config import Config
 from modules.adb_interface import ADBInterface
 from modules.db_manager import DBManager
 
-app = Flask(__name__)
+import sys
+
+# Determine path to resources (templates/static)
+if getattr(sys, 'frozen', False):
+    # Running in a PyInstaller bundle
+    template_folder = os.path.join(sys._MEIPASS, 'templates')
+    static_folder = os.path.join(sys._MEIPASS, 'static')
+    app = Flask(__name__, template_folder=template_folder, static_folder=static_folder)
+else:
+    # Running in normal Python environment
+    app = Flask(__name__)
+
 app.config.from_object(Config)
 
 adb = ADBInterface()
