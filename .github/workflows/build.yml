@@ -30,17 +30,10 @@ jobs:
 
     - name: Build with PyInstaller
       run: |
-        pyinstaller --noconfirm --onedir --console --name "AndroidDBViewer" --add-data "templates;templates" --add-data "static;static" --hidden-import "engineio.async_drivers.threading" app.py
-
-    - name: Archive Release
-      uses: thedoctor0/zip-release@0.7.6
-      with:
-        type: 'zip'
-        filename: 'AndroidDBViewer-Windows.zip'
-        directory: 'dist/AndroidDBViewer'
+        pyinstaller --noconfirm --onefile --console --name "AndroidDBViewer" --add-data "templates;templates" --add-data "static;static" --hidden-import "engineio.async_drivers.threading" app.py
 
     - name: Release
       uses: softprops/action-gh-release@v1
       if: startsWith(github.ref, 'refs/tags/')
       with:
-        files: dist/AndroidDBViewer/AndroidDBViewer-Windows.zip
+        files: dist/AndroidDBViewer.exe
