@@ -1,5 +1,19 @@
 # Changelog
 
+## [v1.2.4] - 2025-12-18
+
+### 🌟 UI/UX Improvements
+- **Visual Change Tracking**: Added a green gradient animation to highlight rows that have changed or been added during real-time monitoring.
+- **Tab Notifications**: Added a red notification dot on background tabs when data updates are detected.
+- **Server Status Indicator**: Added a "Connected/Disconnected" badge in the header with auto-reconnect capability.
+- **Silent Refresh**: Device list now refreshes silently in the background after reconnection, preventing UI flicker.
+
+### 🐛 Bug Fixes
+- **Loading State**: Fixed an issue where the device list would get stuck on "Loading..." due to incorrect event handling.
+- **Stability**: Added timeout protection (10s) and data validation for table data requests to prevent UI freezes.
+- **JS Error**: Fixed a variable redeclaration error (`tabBtn`) in the tab management logic.
+- **Caching**: Implemented cache busting for static resources to ensure clients always load the latest version.
+
 ## [v1.2.3] - 2025-12-18
 
 ### 🐛 Bug Fixes

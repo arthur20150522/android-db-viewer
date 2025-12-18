@@ -26,7 +26,10 @@ document.addEventListener('DOMContentLoaded', function() {
     const runQueryBtn = document.getElementById('run-query');
     const queryResultContainer = document.getElementById('query-result-container');
     const queryHistoryContainer = document.getElementById('query-history');
+    const serverStatusBadge = document.getElementById('server-status');
     let historyCount = 0;
+    let isServerOnline = true;
+    let healthCheckInterval = null;
 
     // Init CodeMirror
     const editor = CodeMirror.fromTextArea(document.getElementById('sql-editor'), {
@@ -53,6 +56,59 @@ document.addEventListener('DOMContentLoaded', function() {
         editor.refresh();
     });
 
+    // --- Server Health Check ---
+
+    async function checkServerHealth() {
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 2000); // 2s timeout
+            
+            const res = await fetch('/api/health', { signal: controller.signal });
+            clearTimeout(timeoutId);
+
+            if (res.ok) {
+                if (!isServerOnline) {
+                    // Reconnected!
+                    isServerOnline = true;
+                    updateServerStatus(true);
+                    // Refresh devices to re-sync (silent background refresh)
+                    fetchDevices(true);
+                }
+            } else {
+                throw new Error('Health check failed');
+            }
+        } catch (e) {
+            if (isServerOnline) {
+                // Disconnected!
+                isServerOnline = false;
+                updateServerStatus(false);
+            }
+        }
+    }
+
+    function updateServerStatus(online) {
+        if (online) {
+            serverStatusBadge.textContent = 'Connected';
+            serverStatusBadge.className = 'badge bg-success';
+            serverStatusBadge.title = 'Server is online';
+            
+            // Re-enable interactions if disabled?
+            document.body.style.opacity = '1';
+            document.body.style.pointerEvents = 'auto';
+        } else {
+            serverStatusBadge.textContent = 'Disconnected';
+            serverStatusBadge.className = 'badge bg-danger animate-pulse'; // animate-pulse needs CSS or just use existing
+            serverStatusBadge.title = 'Cannot reach backend server';
+            
+            // Optional: Dim UI to indicate inactive
+            // document.body.style.opacity = '0.7';
+            // document.body.style.pointerEvents = 'none';
+        }
+    }
+
+    // Start health check loop
+    healthCheckInterval = setInterval(checkServerHealth, 3000);
+
     // --- Tab Management ---
 
     function openTableTab(tableName) {
@@ -61,6 +117,8 @@ document.addEventListener('DOMContentLoaded', function() {
             const tabBtn = document.getElementById(`tab-${tableName}`);
             const tab = new bootstrap.Tab(tabBtn);
             tab.show();
+            // Clear notification if exists
+            clearTabNotification(tableName);
             return;
         }
 
@@ -69,7 +127,8 @@ document.addEventListener('DOMContentLoaded', function() {
             offset: 0,
             limit: 50,
             intervalId: null,
-            monitor: false
+            monitor: false,
+            lastRows: null // Store last data for comparison
         };
 
         // Create Tab Button
@@ -84,6 +143,12 @@ document.addEventListener('DOMContentLoaded', function() {
         `;
         // Insert before SQL tab (last child)
         mainTabs.insertBefore(li, mainTabs.lastElementChild);
+
+        // Bind click event to clear notification
+        const newTabBtn = li.querySelector('button');
+        newTabBtn.addEventListener('shown.bs.tab', () => {
+             clearTabNotification(tableName);
+        });
 
         // Create Tab Content
         const div = document.createElement('div');
@@ -266,22 +331,76 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- API Calls ---
 
-    async function fetchDevices() {
-        deviceSelect.innerHTML = '<option>Loading...</option>';
+    async function fetchDevices(background = false) {
+        // Ensure background is boolean (handle event objects from onclick)
+        const isBackground = background === true;
+
+        if (!isBackground) {
+            deviceSelect.innerHTML = '<option>Loading...</option>';
+        }
         try {
+            let signal = null;
+            if (window.AbortController) {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 5000);
+                signal = controller.signal;
+                // Clean up timeout on completion? 
+                // Fetch promise chain handles it implicitly by ignoring signal after completion? 
+                // No, we should clear timeout.
+                // But we can't easily hook into 'finally' without splitting code.
+                // Let's just trust the timeout or use a wrapper.
+                // Better:
+                fetch('/api/devices', { signal })
+                    .then(res => {
+                        clearTimeout(timeoutId);
+                        return res.json();
+                    })
+                    .then(devices => {
+                        renderDevicesList(devices);
+                    })
+                    .catch(e => {
+                        clearTimeout(timeoutId);
+                        throw e;
+                    });
+                return; // Logic moved to promise chain
+            } 
+            
+            // Fallback for no AbortController or simple execution
             const res = await fetch('/api/devices');
             const devices = await res.json();
-            deviceSelect.innerHTML = '<option value="">Select Device</option>';
-            devices.forEach(d => {
-                const opt = document.createElement('option');
-                opt.value = d.id;
-                opt.textContent = `${d.id} (${d.status})`;
-                opt.dataset.root = d.root;
-                deviceSelect.appendChild(opt);
-            });
+            renderDevicesList(devices);
+
         } catch (e) {
-            deviceSelect.innerHTML = '<option>Error loading devices</option>';
+            if (!isBackground) {
+                deviceSelect.innerHTML = '<option>Error loading devices</option>';
+            }
             console.error(e);
+        }
+    }
+
+    function renderDevicesList(devices) {
+        // Save current selection
+        const currentSelection = deviceSelect.value;
+        
+        deviceSelect.innerHTML = '<option value="">Select Device</option>';
+        devices.forEach(d => {
+            const opt = document.createElement('option');
+            opt.value = d.id;
+            opt.textContent = `${d.id} (${d.status})`;
+            opt.dataset.root = d.root;
+            deviceSelect.appendChild(opt);
+        });
+        
+        // Restore selection if still exists
+        if (currentSelection) {
+            const exists = Array.from(deviceSelect.options).some(o => o.value === currentSelection);
+            if (exists) {
+                deviceSelect.value = currentSelection;
+            } else {
+                // Device disconnected?
+                // Trigger change event to reset UI
+                deviceSelect.dispatchEvent(new Event('change'));
+            }
         }
     }
 
@@ -390,12 +509,84 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         
         try {
-            const res = await fetch(`/api/table/${state.dbToken}/${tableName}?limit=${tabState.limit}&offset=${tabState.offset}`);
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout for heavy data
+
+            const res = await fetch(`/api/table/${state.dbToken}/${tableName}?limit=${tabState.limit}&offset=${tabState.offset}`, {
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            
             const data = await res.json();
-            renderTableData(data.columns, data.rows, container);
+
+            // Check if data is valid
+            if (!data || typeof data.rows === 'undefined') {
+                throw new Error('Invalid data received');
+            }
+
+            // Detect changes
+            let changedIndices = [];
+            let hasGlobalChange = false;
+
+            if (tabState.lastRows && tabState.monitor) {
+                // Simple index-based comparison
+                if (data.rows && Array.isArray(data.rows)) {
+                    data.rows.forEach((row, idx) => {
+                        const oldRow = tabState.lastRows[idx];
+                        // If row is new (idx >= old length) or different content
+                        if (!oldRow || JSON.stringify(row) !== JSON.stringify(oldRow)) {
+                            changedIndices.push(idx);
+                            hasGlobalChange = true;
+                        }
+                    });
+                    // Check if rows were deleted (length changed)
+                    if (data.rows.length !== tabState.lastRows.length) {
+                        hasGlobalChange = true;
+                    }
+                }
+            } else {
+                // First load or pagination change, no animation, just set lastRows
+            }
+            
+            // Update lastRows
+            tabState.lastRows = data.rows; // Clone? data.rows is fresh from JSON, so it's fine.
+
+            // Handle Tab Notification
+            if (hasGlobalChange) {
+                const tabBtn = document.getElementById(`tab-${tableName}`);
+                // Check if tab is active
+                if (tabBtn && !tabBtn.classList.contains('active')) {
+                    showTabNotification(tableName);
+                }
+            }
+
+            renderTableData(data.columns, data.rows, container, changedIndices);
             updatePagination(tableName, data.total);
         } catch (e) {
-            container.innerHTML = '<div class="text-danger p-3">Error loading data</div>';
+            console.error(e);
+            container.innerHTML = `<div class="text-danger p-3">Error loading data: ${e.message}</div>`;
+        }
+    }
+    
+    function showTabNotification(tableName) {
+        const tabBtn = document.getElementById(`tab-${tableName}`);
+        if (!tabBtn) return;
+        
+        // Check if dot already exists
+        if (tabBtn.querySelector('.tab-notification-dot')) return;
+        
+        const dot = document.createElement('span');
+        dot.className = 'tab-notification-dot ms-2';
+        tabBtn.appendChild(dot);
+    }
+
+    function clearTabNotification(tableName) {
+        const tabBtn = document.getElementById(`tab-${tableName}`);
+        if (!tabBtn) return;
+        
+        const dot = tabBtn.querySelector('.tab-notification-dot');
+        if (dot) {
+            dot.remove();
         }
     }
 
@@ -596,7 +787,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    function renderTableData(columns, rows, container) {
+    function renderTableData(columns, rows, container, changedIndices = []) {
         if (!rows || rows.length === 0) {
             container.innerHTML = '<div class="p-3 text-muted">No data found.</div>';
             return;
@@ -608,8 +799,11 @@ document.addEventListener('DOMContentLoaded', function() {
         });
         html += '</tr></thead><tbody>';
         
-        rows.forEach(row => {
-            html += '<tr>';
+        rows.forEach((row, idx) => {
+            const isChanged = changedIndices.includes(idx);
+            const rowClass = isChanged ? 'row-changed' : '';
+            
+            html += `<tr class="${rowClass}">`;
             columns.forEach(col => {
                 html += `<td>${row[col] !== null ? row[col] : '<span class="text-muted">NULL</span>'}</td>`;
             });
@@ -640,7 +834,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- Event Listeners ---
 
-    refreshDevicesBtn.onclick = fetchDevices;
+    refreshDevicesBtn.onclick = () => fetchDevices(false);
 
     // Filter Listeners
     document.querySelectorAll('input[name="pkg-filter"]').forEach(radio => {
