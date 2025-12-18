@@ -62,39 +62,19 @@
             <div class="col-md-9">
                 <ul class="nav nav-tabs" id="main-tabs" role="tablist">
                     <li class="nav-item" role="presentation">
-                        <button class="nav-link active" id="data-tab" data-bs-toggle="tab" data-bs-target="#data-content" type="button" role="tab">Data Browser</button>
-                    </li>
-                    <li class="nav-item" role="presentation">
-                        <button class="nav-link" id="sql-tab" data-bs-toggle="tab" data-bs-target="#sql-content" type="button" role="tab">SQL Editor</button>
+                        <button class="nav-link active" id="sql-tab" data-bs-toggle="tab" data-bs-target="#sql-content" type="button" role="tab">SQL Editor</button>
                     </li>
                 </ul>
                 <div class="tab-content p-3 border border-top-0" id="myTabContent">
-                    <!-- Data Browser Tab -->
-                    <div class="tab-pane fade show active" id="data-content" role="tabpanel">
-                        <div id="data-controls" class="mb-3 d-flex justify-content-between align-items-center" style="display: none !important;">
-                            <h5 id="current-table-name">Select a table</h5>
-                            <div>
-                                <button class="btn btn-sm btn-outline-secondary" id="refresh-data">Refresh</button>
-                            </div>
-                        </div>
-                        <div class="table-responsive" id="data-table-container">
-                            <p class="text-muted">Select a database and table to view data.</p>
-                        </div>
-                        <nav aria-label="Page navigation" id="pagination" style="display: none;">
-                            <ul class="pagination justify-content-center mt-3">
-                                <li class="page-item"><a class="page-link" href="#" id="prev-page">Previous</a></li>
-                                <li class="page-item disabled"><span class="page-link" id="page-info">Page 1</span></li>
-                                <li class="page-item"><a class="page-link" href="#" id="next-page">Next</a></li>
-                            </ul>
-                        </nav>
-                    </div>
-
                     <!-- SQL Editor Tab -->
-                    <div class="tab-pane fade" id="sql-content" role="tabpanel">
+                    <div class="tab-pane fade show active" id="sql-content" role="tabpanel">
                         <div class="mb-3">
                             <textarea id="sql-editor" class="form-control" rows="5">SELECT * FROM sqlite_master</textarea>
                         </div>
                         <button id="run-query" class="btn btn-primary mb-3">Run Query</button>
+                        <div id="query-history" class="accordion mb-3">
+                            <!-- History items will be prepended here -->
+                        </div>
                         <div class="table-responsive" id="query-result-container"></div>
                     </div>
                 </div>
@@ -106,6 +86,9 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/sql/sql.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/hint/show-hint.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/hint/sql-hint.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/hint/show-hint.min.css">
     <script src="/static/js/main.js"></script>
 </body>
 </html>

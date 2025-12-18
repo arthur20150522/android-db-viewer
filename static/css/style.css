@@ -35,6 +35,42 @@ body {
 }
 
 .CodeMirror {
-    height: 200px;
+    height: 300px;
     border: 1px solid #ddd;
+    font-size: 14px;
+}
+
+.CodeMirror-gutters {
+    border-right: 1px solid #ddd;
+    background-color: #f7f7f7;
+    white-space: nowrap;
+}
+
+.CodeMirror-linenumber {
+    padding: 0 3px 0 5px;
+    min-width: 20px;
+    text-align: right;
+    color: #999;
+    white-space: nowrap;
+}
+
+/* Tabs */
+.nav-tabs .nav-link {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.nav-tabs .close-tab {
+    font-size: 1.2rem;
+    line-height: 0.5;
+    color: #999;
+    border-radius: 50%;
+    padding: 0 4px;
+}
+
+.nav-tabs .close-tab:hover {
+    color: #dc3545;
+    background-color: #e9ecef;
 }

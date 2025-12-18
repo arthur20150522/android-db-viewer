@@ -1,0 +1,40 @@
+body {
+    background-color: #f8f9fa;
+}
+
+.sidebar {
+    height: calc(100vh - 80px);
+    overflow-y: auto;
+}
+
+.card-header {
+    background-color: #2c3e50;
+    color: white;
+    font-weight: bold;
+}
+
+.list-group-item {
+    cursor: pointer;
+}
+
+.list-group-item:hover {
+    background-color: #f1f1f1;
+}
+
+.list-group-item.active {
+    background-color: #3498db;
+    border-color: #3498db;
+}
+
+.table th {
+    background-color: #e9ecef;
+}
+
+#sql-editor {
+    border: 1px solid #ced4da;
+}
+
+.CodeMirror {
+    height: 200px;
+    border: 1px solid #ddd;
+}
