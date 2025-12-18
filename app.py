@@ -32,8 +32,14 @@ def get_devices():
 
 @app.route('/api/packages/<device_id>', methods=['GET'])
 def get_packages(device_id):
-    packages = adb.list_packages(device_id)
+    filter_type = request.args.get('filter', 'all')
+    packages = adb.list_packages(device_id, filter_type)
     return jsonify(packages)
+
+@app.route('/api/package-debuggable/<device_id>/<package_name>', methods=['GET'])
+def check_package_debuggable(device_id, package_name):
+    is_debuggable = adb.is_package_debuggable(device_id, package_name)
+    return jsonify({'debuggable': is_debuggable})
 
 @app.route('/api/databases/<device_id>/<package_name>', methods=['GET'])
 def get_databases(device_id, package_name):

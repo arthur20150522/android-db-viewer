@@ -241,10 +241,11 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    async function fetchPackages(deviceId) {
+    async function fetchPackages(deviceId, filter='all') {
         packageList.innerHTML = '<div class="p-2">Loading packages...</div>';
         try {
-            const res = await fetch(`/api/packages/${deviceId}`);
+            const res = await fetch(`/api/packages/${deviceId}?filter=${filter}`);
+            // The backend now returns a list of objects {name: '...', debuggable: null}
             const packages = await res.json();
             renderPackages(packages);
         } catch (e) {
@@ -442,29 +443,79 @@ document.addEventListener('DOMContentLoaded', function() {
 
     let allPackages = [];
     function renderPackages(packages) {
+        // packages is list of {name, debuggable}
         allPackages = packages;
         filterPackages();
     }
 
     function filterPackages() {
         const term = packageSearch.value.toLowerCase();
-        const filtered = allPackages.filter(p => p.toLowerCase().includes(term));
+        const onlyDebug = document.getElementById('filter-debug').checked;
+
+        const filtered = allPackages.filter(p => {
+            const matchesTerm = p.name.toLowerCase().includes(term);
+            const matchesDebug = onlyDebug ? p.debuggable === true : true;
+            return matchesTerm && matchesDebug;
+        });
         
         packageList.innerHTML = '';
-        filtered.forEach(p => {
+        
+        // Optimization: Only render first 100 to keep DOM light
+        const toRender = filtered.slice(0, 100);
+        
+        toRender.forEach(p => {
             const item = document.createElement('a');
-            item.className = 'list-group-item list-group-item-action';
-            item.textContent = p;
+            item.className = 'list-group-item list-group-item-action d-flex justify-content-between align-items-center';
+            item.id = `pkg-${p.name}`;
+            
+            const nameSpan = document.createElement('span');
+            nameSpan.textContent = p.name;
+            item.appendChild(nameSpan);
+            
+            // Badge placeholder
+            const badge = document.createElement('span');
+            badge.className = 'badge rounded-pill bg-secondary';
+            badge.style.display = 'none'; // Hide initially
+            badge.textContent = '...';
+            item.appendChild(badge);
+
             item.onclick = () => {
                 // Highlight
                 document.querySelectorAll('#package-list .active').forEach(el => el.classList.remove('active'));
                 item.classList.add('active');
                 
-                state.package = p;
-                fetchDatabases(state.deviceId, p);
+                state.package = p.name;
+                fetchDatabases(state.deviceId, p.name);
             };
             packageList.appendChild(item);
+            
+            // Trigger check if not known
+            if (p.debuggable === null) {
+                // Check status
+                fetch(`/api/package-debuggable/${state.deviceId}/${p.name}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        p.debuggable = data.debuggable;
+                        updatePackageBadge(badge, data.debuggable);
+                    });
+            } else {
+                updatePackageBadge(badge, p.debuggable);
+            }
         });
+    }
+    
+    function updatePackageBadge(badge, isDebuggable) {
+        if (isDebuggable) {
+            badge.className = 'badge rounded-pill bg-success';
+            badge.innerHTML = '🐛 Debug';
+            badge.style.display = 'inline-block';
+            badge.title = 'Debuggable (Accessible without Root)';
+        } else {
+            // Optional: Show "Release" or nothing
+            // badge.className = 'badge rounded-pill bg-light text-dark';
+            // badge.textContent = 'Rel';
+            badge.style.display = 'none';
+        }
     }
 
     function renderDatabases(dbs) {
@@ -547,18 +598,38 @@ document.addEventListener('DOMContentLoaded', function() {
 
     refreshDevicesBtn.onclick = fetchDevices;
 
+    // Filter Listeners
+    document.querySelectorAll('input[name="pkg-filter"]').forEach(radio => {
+        radio.addEventListener('change', (e) => {
+            if (state.deviceId) {
+                fetchPackages(state.deviceId, e.target.value);
+            }
+        });
+    });
+
+    const filterDebug = document.getElementById('filter-debug');
+    filterDebug.addEventListener('change', () => {
+        filterPackages(); // Re-filter on client side
+    });
+
     deviceSelect.onchange = () => {
         const selected = deviceSelect.options[deviceSelect.selectedIndex];
         state.deviceId = selected.value;
         const isRoot = selected.dataset.root === 'true'; 
         
         if (state.deviceId) {
-            rootStatus.textContent = isRoot ? '✅ Rooted' : '❌ Not Rooted';
-            rootStatus.className = isRoot ? 'mt-1 small text-success' : 'mt-1 small text-danger';
+            // Update UI for non-root but run-as support
             if (isRoot) {
+                rootStatus.textContent = '✅ Rooted';
+                rootStatus.className = 'mt-1 small text-success';
+                // Reset filter to All when changing device
+                document.getElementById('filter-all').checked = true;
                 fetchPackages(state.deviceId);
             } else {
-                packageList.innerHTML = '<div class="text-warning p-2">Device must be rooted to access databases.</div>';
+                rootStatus.textContent = '⚠️ Not Rooted (Only debuggable apps supported)';
+                rootStatus.className = 'mt-1 small text-warning';
+                document.getElementById('filter-all').checked = true;
+                fetchPackages(state.deviceId); // Try to list packages anyway
             }
         } else {
             rootStatus.textContent = '';
