@@ -1,5 +1,10 @@
 # Changelog
 
+## [v1.2.5] - 2025-12-18
+
+### ⚡ Improvements
+- **Auto-Open**: Automatically opens the default web browser when the application starts.
+
 ## [v1.2.4] - 2025-12-18
 
 ### 🌟 UI/UX Improvements

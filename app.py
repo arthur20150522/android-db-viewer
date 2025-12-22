@@ -139,5 +139,16 @@ def execute_query(token):
 def health_check():
     return jsonify({'status': 'ok', 'timestamp': int(time.time())})
 
+import webbrowser
+from threading import Timer
+
 if __name__ == '__main__':
+    # Open browser after a short delay to ensure server is running
+    def open_browser():
+        webbrowser.open_new("http://127.0.0.1:5000")
+
+    # If running in a frozen bundle (EXE) or standard mode without reloader
+    if getattr(sys, 'frozen', False) or not os.environ.get("WERKZEUG_RUN_MAIN"):
+        Timer(1.5, open_browser).start()
+
     app.run(debug=True, port=5000)
